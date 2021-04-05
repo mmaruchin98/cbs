@@ -1,0 +1,103 @@
+---
+title: "lab3_cbs"
+author: "Michał Maruchin"
+
+---
+
+```{r setup}
+library(RColorBrewer)
+library(gplots)
+library(ggplot2)
+library(data.table)
+library(devtools)
+library(Biobase)
+library(limma)
+library(edge)
+library(genefilter)
+library(qvalue)
+library(tidyverse)
+library(data.table)
+library(corpcor)
+library(irlba)
+library(Rtsne)
+
+con = url("http://bowtie-bio.sourceforge.net/recount/ExpressionSets/bottomly_eset.RData")
+load(file=con)
+save(bottomly.eset, file="bottomly.Rdata")
+load(file="bottomly.Rdata")
+edata <- as.matrix(exprs(bottomly.eset))
+edata <- edata[rowMeans(edata) > 10, ]
+edata <- log2(as.matrix(edata) + 1)
+
+```
+
+
+
+Homework Problem 1:
+```{r problem1}
+my_palette <- colorRampPalette(c("blue", "white", "red"))(n = 299)
+('problem1_maruchin_lab3.pdf')
+heatmap.2(edata,
+          main = "Bottomly et al. Clustered", # heat map title
+          notecol="black",      # change font color of cell labels to black
+          density.info="none",  # turns off density plot inside color legend
+          trace="none",         # turns off trace lines inside the heat map
+          margins =c(12,9),     # widens margins around plot
+          col=my_palette,       # use on color palette defined earlier 
+          dendrogram="column",     # only draw a row dendrogram
+          scale = "column")
+dev.off()
+
+```
+
+Homework Problem 2: 
+```{r problem2}
+pdf('problem2_maruchin_lab3.pdf')
+edata = t(scale(t(edata), scale=FALSE, center=TRUE))
+svd.out = svd(edata)
+PC = data.table(svd.out$v,pData(bottomly.eset))
+ggplot(PC) + geom_point(aes(x=V2, y=V3, col=as.factor(strain)))
+dev.off()
+```
+
+Homework Problem 3: 
+```{r problem3}
+pdf('problem3_maruchin_lab3.pdf')
+PC= data.table(svd.out$u, pData(bottomly.eset)) 
+ggplot(PC) + geom_point(aes(x=V1, y=V2, col=as.factor(strain))) + ggtitle("Top 2 left singular vectors") 
+dev.off()
+```
+
+
+Homework Problem 4: Make one figure that contains violin plots of the top 5 left singular vectors (loadings). 
+Hint/To-do: Make sure turn the top 5 left singular vectors into a data.table (or a data.frame) and 
+ggplot2 to plot them altogether.
+```{r problem4}
+library(ggpubr)
+
+top5left = cbind(PC[,1:5],PC[,c('strain')])
+pdf('problem4_maruchin_lab3.pdf')
+top1= ggplot(top5left) + geom_violin(aes(x=as.factor(strain), y=V1),draw_quantiles = c(0.25, 0.5, 0.75))
+top2= ggplot(top5left) + geom_violin(aes(x=as.factor(strain), y=V2),draw_quantiles = c(0.25, 0.5, 0.75))
+top3= ggplot(top5left) + geom_violin(aes(x=as.factor(strain), y=V3),draw_quantiles = c(0.25, 0.5, 0.75))
+top4= ggplot(top5left) + geom_violin(aes(x=as.factor(strain), y=V4),draw_quantiles = c(0.25, 0.5, 0.75))
+top5= ggplot(top5left) + geom_violin(aes(x=as.factor(strain), y=V5),draw_quantiles = c(0.25, 0.5, 0.75))
+figure <- ggarrange(top1, top2, top3, top4, top5,
+                    labels = c("u1", "u2", "u3", "u4", "u5"),
+                    ncol = 2, nrow = 3)
+figure
+dev.off()
+```
+
+Homework Problem 5: 
+```{r problem5}
+pdf('problem5_maruchin_lab5.pdf')
+set.seed(1)
+tsne_out <- Rtsne(edata,pca=TRUE,perplexity=30)
+tsne_out = data.table(tsne_out$Y)
+km = kmeans(x = edata, centers = 5)$cluster
+tsne_out = cbind(tsne_out, km)
+
+ggplot(tsne_out) + geom_point(aes(x=V1, y=V2, col=as.factor(km)))
+dev.off()
+```
