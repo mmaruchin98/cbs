@@ -1,0 +1,29 @@
+---
+title: "lab1_cbs"
+output: html_document
+---
+
+library(data.table)
+library(Biobase)
+library(GEOquery)
+library(tidyverse)
+library(RColorBrewer)
+library(gplots)
+library(ggplot2)
+        
+dat <- getGEO('GDS39', destdir=".")
+geneexp <- Table(dat)
+geneexp.tidy <- gather(geneexp, key="Samples", value="GeneExp", -c(1,2))
+rows_missing <- apply(geneexp.tidy, 1, function(x) any(is.na(x)))
+geneexp.tidy.complete <- geneexp.tidy[!rows_missing,]
+
+
+ggplot(geneexp.tidy.complete, aes(x=Samples, y=IDENTIFIER,fill=GeneExp)) + 
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "yellow", midpoint = 0, limits=c(-3,3)) +
+  theme(axis.text.y=element_blank())
+  
+
+
+
+
