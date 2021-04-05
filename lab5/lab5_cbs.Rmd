@@ -1,0 +1,237 @@
+```{r install}
+library(bladderbatch)
+library(devtools)
+library(Biobase)
+library(sva)
+library(bladderbatch)
+library(broom)
+library(tidyverse)
+library(data.table)
+library(gridExtra)
+library(grid)
+library(ggpubr)
+library(gplots)
+library(RColorBrewer)
+library(ggplot2)
+library(DT)
+library(sva)
+library(broom)
+library(dplyr)
+library(RColorBrewer)
+con = url("http://bowtie-bio.sourceforge.net/recount/ExpressionSets/bottomly_eset.RData")
+load(file=con)
+close(con)
+save(bottomly.eset, file="bottomly.Rdata")
+
+load(file="bottomly.Rdata")
+ls()
+
+edata <- as.matrix(exprs(bottomly.eset))
+dim(edata)
+edata[1:5,1:5]
+edata <- edata[rowMeans(edata) > 10, ]
+edata <- log2(as.matrix(edata) + 1)
+```
+Homework Problem 1: 
+```{r problem1a}
+data(bladderdata)
+#batch vs cancer
+pheno = pData(bladderEset)
+pheno = pheno %>% rownames_to_column("CEL") 
+pheno = data.frame(pheno)
+pheno = pheno[order(pheno$batch),]
+pheno = pheno[,c('CEL', 'batch', 'cancer')]
+pheno = datatable(pheno) %>% formatStyle('cancer')
+pheno = pheno %>% formatStyle('batch')
+pheno
+
+```
+
+```{r problemb}
+#batch vs outcome
+pheno = pData(bladderEset)
+pheno = pheno %>% rownames_to_column("CEL") 
+pheno = data.frame(pheno)
+pheno = pheno[order(pheno$batch),]
+pheno = pheno[,c('CEL', 'batch', 'outcome')]
+pheno = datatable(pheno) %>% formatStyle('outcome')
+pheno = pheno %>% formatStyle('batch')
+
+pheno
+
+```
+Homework Problem 2: 
+
+```{r problem2}
+
+data(bladderdata)
+pheno = pData(bladderEset)
+edata = exprs(bladderEset)
+edata.t = as.data.frame(t(edata))
+edata.t$batch = pheno$batch
+edata.t = edata.t[order(edata.t$batch),]
+
+
+my_palette <- colorRampPalette(c("blue", "white", "darkred"))(n = 299)
+
+heatmap.2(as.matrix(edata.t),
+          main = "Heatmap before ComBat", # heat map title
+          notecol="black",      # change font color of cell labels to black
+          density.info="none",  # turns off density plot inside color legend
+          trace="none",         # turns off trace lines inside the heat map
+          margins =c(12,9),     # widens margins around plot
+          col=my_palette,       # use on color palette defined earlier 
+          dendrogram="none",     # only draw a row dendrogram
+          scale = "row",
+          Colv=FALSE)
+
+```
+
+```{r problem2b}
+batch = pheno$batch
+edata = ComBat(dat=edata, batch=pheno$batch, mod=model.matrix(~1, data=pheno), par.prior=TRUE, prior.plots=TRUE)
+edata.t = as.data.frame(t(edata))
+edata.t$batch = pheno$batch
+edata.t = edata.t[order(edata.t$batch),]
+
+my_palette <- colorRampPalette(c("blue", "white", "darkred"))(n = 299)
+
+heatmap.2(as.matrix(edata.t),
+          main = "Heatmap after ComBat", # heat map title
+          notecol="black",      # change font color of cell labels to black
+          density.info="none",  # turns off density plot inside color legend
+          trace="none",         # turns off trace lines inside the heat map
+          margins =c(12,9),     # widens margins around plot
+          col=my_palette,       # use on color palette defined earlier
+          dendrogram="none",     # only draw a row dendrogram
+          scale = "row",
+          Colv=FALSE)
+
+```
+
+"Homework Problem 3: 
+
+```{r problem3}
+data(bladderdata)
+pheno = pData(bladderEset)
+edata = exprs(bladderEset)
+cor_edata = cor(edata, method = 'pearson')
+CEL = rownames(cor_edata) 
+cancer = pheno[,2]
+batch = pheno[,3]
+res = list()
+for (i in 1:length(CEL)){
+  res[i] <- paste(CEL[i], cancer[i], batch[i])
+}
+rownames(cor_edata) = res
+colnames(cor_edata) = res
+
+my_palette <- colorRampPalette(c("blue", "white", 'yellow', "darkred"))(n = 299)
+heatmap.2(as.matrix(cor_edata),
+          main = "Pearson correlationss", # heat map title
+          notecol="black",      # change font color of cell labels to black
+          density.info="none",  # turns off density plot inside color legend
+          trace="none",         # turns off trace lines inside the heat map
+          margins =c(12,9),     # widens margins around plot
+          col=my_palette,       # use on color palette defined earlier
+          dendrogram="none",     # only draw a row dendrogram
+          scale = 'none',
+          Colv=FALSE)
+```
+
+Homework Problem 4
+```{r prbolem4}
+data(bladderdata)
+library(ggpubr)
+pheno = pData(bottomly.eset)
+edata = as.matrix(exprs(bottomly.eset))
+
+
+lin = lm(t(edata[,]) ~ as.factor(pheno$strain) + as.factor(pheno$experiment.number))
+lin_tidy = tidy(lin)
+
+a = ggplot(lin_tidy, aes(estimate, term)) + geom_point() + 
+  geom_vline(xintercept = 0) + 
+  ggtitle("Coefficients - before combat")
+
+
+combat = ComBat(dat=edata, batch=pheno$experiment.number, 
+                           mod=model.matrix(~1, data=pheno), par.prior=TRUE, prior.plots=TRUE)
+lin_combat = lm(t(combat[,]) ~ as.factor(pheno$strain))
+lin_combat_tidy = tidy(lin_combat)
+
+b = ggplot(lin_combat_tidy, aes(estimate, term)) + geom_point() + 
+  geom_vline(xintercept = 0) + ggtitle("Coefficients - after combat")
+
+b = ggplot(lin_combat_tidy, aes(estimate, term)) + geom_point() + 
+  geom_vline(xintercept = 0) + ggtitle("Coefficients - after combat")
+
+d=ggplot(lin_tidy%>% filter(term == "as.factor(pheno$experiment.number)6")) + geom_histogram(aes(x=p.value)) + ggtitle("Experiment 6")
+
+e=ggplot(lin_tidy%>% filter(term == "as.factor(pheno$strain)DBA/2J")) + geom_histogram(aes(x=p.value)) + ggtitle("Strain DBA/2J")
+
+f=ggplot(lin_tidy%>% filter(term == "as.factor(pheno$experiment.number)7")) + geom_histogram(aes(x=p.value)) + ggtitle("Experiment 7")
+
+g=ggplot(lin_combat_tidy%>% filter(term == "as.factor(pheno$strain)DBA/2J")) + geom_histogram(aes(x=p.value)) + ggtitle("Strain DBA/2J after combat")
+
+figure1 <- ggarrange(d, e, f, g,  ncol = 2, nrow = 2)
+figure1
+
+
+figure <- ggarrange(a, b)
+figure
+
+```
+
+
+'Homework Problem 5
+```{r problem5}
+edata= edata[rowMeans(edata)>5,]
+sva= model.matrix(~as.factor(strain), data=pheno)
+
+num.sv(edata, sva_mod, method="be")
+sva1 = model.matrix(~1, data=pheno)
+sva_out = sva(edata, sva_mod, sva1, n.sv=num.sv(edata, sva_mod, method="be"))
+
+lin_sva = lm(t(edata) ~ as.factor(pheno$strain) + sva_out$sv)
+lin_sva_tidy = tidy(lin_sva)
+
+edata_combat_sva = ComBat(dat=edata, batch=pheno$experiment.number, mod=model.matrix(~1, data=pheno), par.prior=TRUE, prior.plots=TRUE)
+lin_combat_sva= lm(t(edata_combat_sva[,]) ~ as.factor(pheno$strain))
+lin_combat_sva_tidy  = tidy(lin_combat_sva_mod)
+
+edata= edata[rowMeans(edata)>5,]
+sva= model.matrix(~as.factor(strain), data=pheno)
+
+num.sv(edata, sva_mod, method="be")
+sva1 = model.matrix(~1, data=pheno)
+sva_out = sva(edata, sva_mod, sva1, n.sv=num.sv(edata, sva_mod, method="be"))
+
+lin_sva = lm(t(edata) ~ as.factor(pheno$strain) + sva_out$sv)
+lin_sva_tidy = tidy(lin_sva)
+
+edata_combat_sva = ComBat(dat=edata, batch=pheno$experiment.number, mod=model.matrix(~1, data=pheno), par.prior=TRUE, prior.plots=TRUE)
+lin_combat_sva= lm(t(edata_combat_sva[,]) ~ as.factor(pheno$strain))
+lin_combat_sva_tidy  = tidy(lin_combat_sva_mod)
+
+
+c = ggplot(lin_sva_tidy, aes(estimate, term)) + geom_point() + geom_vline(xintercept = 0) + 
+  ggtitle("Coeff before ComBat")
+
+d= ggplot(lin_combat_sva_tidy , aes(estimate, term)) + geom_point() + geom_vline(xintercept = 0) +   ggtitle("Coeff after Combat")
+
+library(ggpubr)
+figure <- ggarrange(c, d)
+figure
+
+a = ggplot(lin_sva_tidy%>% filter(term == "as.factor(pheno$strain)DBA/2J")) + 
+  geom_histogram(aes(x=p.value), bins = 50) + ggtitle("P-vaule before Combat")
+
+b = ggplot(lin_combat_sva_tidy %>% filter(term == "as.factor(pheno$strain)DBA/2J")) + 
+  geom_histogram(aes(x=p.value), bins = 50) + ggtitle("P-vaule after Combat")
+
+
+figure <- ggarrange(a, b)
+figure
+  
+```
