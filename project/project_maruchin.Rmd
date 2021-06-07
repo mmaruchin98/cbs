@@ -1,0 +1,455 @@
+---
+title: "Astrocyte reactivity: RNA-seq data analysis"
+output: 
+    pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+```{r load_hidden, echo=FALSE, results="hide", warning=FALSE}
+suppressPackageStartupMessages({
+library(tidyverse)
+library(Biobase)
+library(GEOquery)
+library(data.table)
+})
+```
+
+
+## Orignal paper title:
+Modulation of astrocyte reactivity improves functional deficits in mouse models of Alzheimer’s disease
+https://doi.org/10.1186/s40478-018-0606-1
+
+
+## Expring GEO (Gene Expression Omnibus)
+GEO - Gene Expression Omnibus \
+GDS - GEO DataSet \
+GSE - GEO Series \
+GPL - GEO Platform \
+https://www.ncbi.nlm.nih.gov/geo/info/faq.html \
+
+Download GEO data and create the GEOquery object
+```{r geo, echo=T, results=F, warning=FALSE, cache=T, message=F}
+gse <- getGEO('GSE108520')
+
+```
+\  
+
+Obtaining samples matadata:
+```{r echo=T}
+
+class(gse)
+length(gse)
+
+gse <- gse[[1]]
+class(gse)
+
+pheno     <- pData(gse) ## print the sample information
+
+glimpse(pheno, width=80)
+```
+
+\  
+\  
+
+Now we take GSE object:
+```{r geo2, cache=T, echo=T,  message=F}
+
+geo_dat <- getGEO('GSE108520', destdir=".", GSEMatrix=F, AnnotGPL=T)
+
+```
+
+```{r}
+mode(geo_dat)
+class(geo_dat)
+```
+We are sure **geo_dat** is **GSE** Class
+\  
+
+
+### Exploring papaer information
+```{r}
+meta <- Meta(geo_dat)
+attributes(meta)
+
+```
+
+\  
+
+Summary:
+```{r echo=T,  results=F, message=F, warning=F}
+meta$summary
+```
+We analyzed the transcriptional profile of  astrocytes from:
+1) WT mice infected with AAV-GFP
+2) reactive astrocytes from 9-month old APP/PSdE9 mice infected with AAV-GFP
+3) de-activated astrocytes from 9-month old APP/PSdE9 mice infected with AAV-SOCS3
+"We show SOCS3 normalizes the inflammatory profile of APP astrocytes
+
+\  
+
+Experiment type:
+```{r echo=T,   results=F, message=F, warning=F}
+meta$type
+```
+Expression profiling by high throughput sequencing
+
+\  
+
+```{r echo=T,   results=F, message=F, warning=F}
+meta$overall_design
+```
+Total RNA was extracted from GFP+ astrocytes isolated by FACS from WT and APP/PS1dE9 mice injected with an AAV targeting astrocytes and encoding GFP alone (controls, N=7 WT-GFP, N=4 APP-GFP) or SOCS3 and GFP (N=5 APP-SOCS3, same total viral load). Non GFP+ cells (including microglia, neurons, non infected astrocytes, called OTHER) were analyzed as  well, in 3 samples of the control WT-GFP group.
+
+
+\newpage
+
+## Data Analysis
+
+\ 
+
+Getting data:
+```{r echo=T,   results=F, message=F, warning=F}
+data_file <- meta$supplementary_file
+dat <- read_delim(data_file, delim = "\t")
+#dat <- read_delim("GSE108520_Deseq2_normalized_gene_expression_with_annotations.txt.gz", delim="\t")
+```
+
+
+```{r echo=T, results=T, cache=T}
+glimpse(dat, width=80)
+
+```
+
+\  
+
+Format data:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+names(dat)
+edat_raw <- dat %>% select(-coordinates, -symbol)
+edat_raw <- edat_raw %>% column_to_rownames(var='FastDB Stale ID')
+edat_raw <- edat_raw[,sort(names(edat_raw))]
+
+dim(edat_raw)
+## gene names in rows
+## samples in columns
+edat_raw[1:5,1:4]
+
+summary(edat_raw[,1:4])
+```
+
+\  
+
+Preparing datastes, metadata with four groups:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+## we colud parse samples metadata just from samples name, but let's do it form GEO metadata
+pheno %>% select(title, description) 
+
+pdf4       <- pheno %>% select(title) 
+pdf4$title <- pdf4$title %>%  str_replace_all("-","_")
+
+pdf4$group <- str_split(pdf4$title, "_\\d", simplify=T)[,1] %>% 
+  str_replace_all("Astro_","a") %>% 
+  str_replace_all("Other_","o")
+
+pdf4$group <- as.factor(pdf4$group)
+names(pdf4) <- c("sname", "group")
+rownames(pdf4) <- pdf4$sname
+pdf4 <- arrange(pdf4, sname)
+
+pdf4 %>% dplyr::count(group)
+
+pdf4
+```
+
+\ 
+
+Preparing metadata with three groups; we remove "other" types as they are not astrocytes, so thier experssion obvioulsy will be different:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+pdf3<- pdf4 %>% filter(!group=='oWT_GFP')
+pdf3 <- droplevels(pdf3)
+pdf3 %>% dplyr::count(group)
+
+```
+
+\  
+
+Filtering expression counts and log transformation
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+## remove low expressed data
+edat10  <- edat_raw[rowMeans(edat_raw) > 10, ] %>% arrange(rownames(.))
+## wa want fold changes, but we can't do log2(0) so we add 1
+edatlog4 <- log2(as.matrix(edat10) + 1) %>% as.data.frame()
+
+## let's create only data set for three groups
+edatraw3 <- edat_raw %>%  select(-Other_WT_GFP_1, -Other_WT_GFP_2, -Other_WT_GFP_3) %>% arrange(rownames(.)) 
+edatraw3 <- edatraw3[rowMeans(edatraw3) > 10, ] 
+edatlog3 <- log2(as.matrix(edatraw3) + 1) %>% as.data.frame()
+
+summary(edatlog3[,1:4])
+
+```
+
+\  
+
+Let's make sure the names are aligned
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+all.equal(colnames(edat_raw), pdf4$sname)
+all.equal(colnames(edatlog4), pdf4$sname)
+all.equal(colnames(edatraw3), pdf3$sname)
+all.equal(colnames(edatlog3), pdf3$sname)
+
+dim(edat_raw)
+dim(edatlog4)
+dim(edatraw3)
+dim(edatlog3)
+
+```
+\  
+
+Let's make some data in tidy form:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+etidy <- gather(edatlog4, key="sname", value="expr") %>% arrange(sname)
+etidy <- left_join(etidy, pdf4)
+```
+
+\  
+
+Let's see data summary:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+ggplot(etidy, aes(x=0,y=expr, fill=group)) + 
+  geom_boxplot()  + 
+  facet_grid(~sname) + 
+  ylab("log2(counts)") +
+  xlab("")
+```
+
+\  
+
+Summary per group:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+ggplot(etidy, aes(x=0,y=expr, fill=group)) + 
+  geom_boxplot()  + 
+  facet_grid(~group) + 
+  ylab("log2(counts)") +
+  xlab("")
+```
+
+\
+
+Histograms per group:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+
+ggplot(etidy, aes(x=expr, fill=group)) + 
+  geom_histogram(bins="50")  + 
+  facet_grid(~group) 
+```
+
+\ 
+
+Density plots:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+ggplot(etidy, aes(x=expr, colour=sname)) + 
+  geom_density()  
+
+ggplot(etidy, aes(x=expr, colour=group)) + 
+  geom_density()  
+```
+
+\  
+
+Heatmap:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+
+library(pheatmap)
+
+corMatrix <- cor(edatlog4)
+pheatmap(corMatrix, annotation_col = select(pdf4, -sname))      
+
+```
+
+
+PCA:
+```{r echo=T,   results=T, message=F, warning=F, cache=T}
+library(ggplot2)
+library(ggrepel)
+library(stats)
+
+expr_pca<-prcomp(t(edatlog4), center = TRUE, scale. = TRUE) 
+summary(expr_pca)
+
+screeplot(expr_pca, type = "l", npcs = 10, main = "Screeplot of the first 10 PCs")
+
+imp <- summary(expr_pca)$importance
+pc1 <- round(imp["Proportion of Variance","PC1"] *100, digits=0)
+pc2 <- round(imp["Proportion of Variance","PC2"] *100, digits=0)
+
+cbind(pdf4, expr_pca$x) %>% 
+ ggplot(aes(x = PC1, y=PC2, col=group, label=rownames(pdf4) ) ) + 
+ geom_point() + 
+ geom_text_repel() +
+ ylab(paste0("PC2(",pc2,"%)")) + 
+ xlab(paste0("PC1(",pc1,"%)"))
+
+```
+
+We see, that other group has a bit different density profiles and cluster together. It is expected, as these are different cell types. We exclude them from differential expression analysis
+
+
+
+\newpage
+
+### Differential Expression for many groups
+
+Many sources recommend to use linear models to find relations in RNA-seq count data, however in such scenario the data should be normally distributed (or at least the LM's residuals should). In the paper they use ANOVA or Kruskal-Wallis tests, depending on assumptions fulfillment.
+
+\  
+
+Here I try to use Generalized Linear Model, as RNA-Seq use to be not normal. 
+Firstly let's test a normality of some random sample (if just one sample is not normally distributed, we can't use parametric testes or linear models)
+
+```{r}
+shapiro.test(sample(edatraw3$Astro_APP_GFP_2, 5000))
+
+shapiro.test(sample(edatlog3$Astro_APP_GFP_2, 5000))
+
+```
+Shapiro-Wilk's p-value is less than 0.01 in both datasets (raw counts and log ratios), so should use non-parametric approaches
+
+Let's check a qq plot:
+```{r qq, cache=T}
+library(ggpubr)
+
+ggqqplot(data=edatlog3, x="Astro_APP_GFP_2") 
+ggqqplot(data=edatraw3, x="Astro_APP_GFP_2") 
+
+```
+Both plots are concordant with the results of SW test.
+
+\  
+
+We can do the same test for some random genes (across all samples)
+```{r qq2, cache=T}
+test1 <- as.numeric(edatlog3['GSMG0032532',])
+test2 <- as.numeric(edatlog3['GSMG0026079',])
+shapiro.test(test1)
+shapiro.test(test2)
+
+
+```
+
+\newpage
+
+GLM:
+Crate a description and contrast matrix: we are interested in differences in any group pairs
+```{r}
+suppressPackageStartupMessages({library(edgeR);library(limma)})
+
+des_mat <- model.matrix(~ group + 0, data = pdf3)
+colnames(des_mat) <- stringr::str_remove(colnames(des_mat), "group")
+
+print(des_mat)
+
+
+contrast_matrix <- makeContrasts(
+  "aAPP_GFPvs" = aAPP_GFP  - aWT_GFP ,
+  "aAPP_SOCSvs"= aAPP_SOCS - aWT_GFP ,
+  "SOCS_GFAP"  = aAPP_SOCS - aAPP_GFP ,
+  levels = des_mat
+)
+
+print(contrast_matrix)
+```
+
+\  
+
+Let's be sure again that the names in data and matadata are aligned
+```{r}
+all.equal(colnames(edatraw3), pdf3$sname)
+
+```
+
+\newpage
+
+For GLM we use raw counts data:
+```{r glm, echo=T,   results=T, message=F, warning=F, cache=T}
+# https://bioinformatics-core-shared-training.github.io/RNAseq-R/rna-seq-de.nb.html
+# https://rpubs.com/bman/79395
+
+# dge <- DGEList( counts=edatlog3, group=pdf3$group, lib.size=colSums( edatlog3 ) )
+dge <- DGEList( counts=edatraw3, group=pdf3$group, lib.size=colSums( edatraw3 ) )
+dge <- calcNormFactors( dge )
+
+dge <- estimateGLMCommonDisp( dge, des_mat )
+dge <- estimateGLMTrendedDisp( dge, des_mat )
+dge <- estimateGLMTagwiseDisp( dge, des_mat )
+
+fit <- glmFit( dge, des_mat )
+
+glms <- glmLRT( fit, contrast=contrast_matrix )
+
+diffs <-topTags( glms, n = nrow(glms)) %>% as.data.frame() %>% filter(FDR<0.01) %>% rownames_to_column("genes")
+
+
+gene_map <- dat %>% select(`FastDB Stale ID`, symbol)
+colnames(gene_map) <- c("genes", "symbol")
+
+diffs <- select(diffs, genes, FDR)
+
+left_join(diffs,gene_map) %>% select(genes, symbol, FDR)
+  
+```
+
+\  
+
+We discovered `r dim(diffs)[1]` significant results. The next step could be GO and KEGG anntations, functional analysis etc. but this is out of the scope of this project.
+At the end let's visualize some randomly selected results (gene expressions)
+
+```{r, message=F, warning=F}
+
+plot_gene_expr <- function(gene_id) {
+
+  top_gene_df <- edatraw3 %>%
+    # Extract this gene from `expression_df`
+    dplyr::filter(rownames(.) == gene_id) %>% as.matrix() %>% 
+    # Transpose so the gene is a column
+    t() %>%
+    # Transpose made this a matrix, let's make it back into a data.frame like before
+    data.frame() %>%
+    # Store the sample ids as their own column instead of being row names
+    tibble::rownames_to_column("sname") %>%
+    # # Join on the selected columns from metadata
+    dplyr::inner_join(dplyr::select(
+      pdf3,
+      sname,
+      group
+    ))
+  
+  ggplot(top_gene_df, aes_string(x = "group", y = gene_id, color = "group")) +
+    geom_jitter(width = 0.1, height = 0, size=5) + 
+    theme_classic() 
+}
+
+
+plot_gene_expr("GSMG0025455")
+plot_gene_expr("GSMG0013278")
+plot_gene_expr("GSMG0013663")
+plot_gene_expr("GSMG0030665")
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
